@@ -100,6 +100,7 @@ jst = "jarvis.jarvis_stats.cli:main"
 
 [tool.maturin]
 python-source = "src"
+python-packages = ["jarvis"]
 manifest-path = "rust/jarvis_native/Cargo.toml"
 
 
