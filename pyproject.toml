@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.6,<2"]
+build-backend = "maturin"
 
 [project]
 name = "jarvis-ai-assistant"
@@ -60,6 +60,7 @@ rag = [
     "unstructured[md]",
     "rank-bm25",
 ]
+native = ["maturin>=1.6,<2"]
 
 [project.urls]
 Homepage = "https://github.com/skyfireitdiy/Jarvis"
@@ -96,6 +97,10 @@ jarvis-rag = "jarvis.jarvis_rag.cli:main"
 jrg = "jarvis.jarvis_rag.cli:main"
 jarvis-stats = "jarvis.jarvis_stats.cli:main"
 jst = "jarvis.jarvis_stats.cli:main"
+
+[tool.maturin]
+python-source = "src"
+manifest-path = "rust/jarvis_native/Cargo.toml"
 
 
 

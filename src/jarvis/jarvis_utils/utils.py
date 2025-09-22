@@ -24,6 +24,10 @@ from jarvis.jarvis_utils.embedding import get_context_token_count
 from jarvis.jarvis_utils.globals import get_in_chat, get_interrupt, set_interrupt
 from jarvis.jarvis_utils.input import user_confirm
 from jarvis.jarvis_utils.output import OutputType, PrettyOutput
+# Native implementation required (PyO3)
+from jarvis import jarvis_native as _jarvis_native  # type: ignore
+if not hasattr(_jarvis_native, "get_file_md5"):
+    raise RuntimeError("jarvis_native extension is required but not available")
 
 # 向后兼容：导出 get_yes_no 供外部模块引用
 get_yes_no = user_confirm
@@ -1730,30 +1734,13 @@ def while_true(func: Callable[[], bool], sleep_time: float = 0.1, max_retries: i
 
 
 def get_file_md5(filepath: str) -> str:
-    """计算文件内容的MD5哈希值
-
-    参数:
-        filepath: 要计算哈希的文件路径
-
-    返回:
-        str: 文件内容的MD5哈希值
-    """
-    return hashlib.md5(open(filepath, "rb").read(100 * 1024 * 1024)).hexdigest()
+    """计算文件内容的MD5哈希值（使用Rust原生实现，读取前100MB）"""
+    return str(_jarvis_native.get_file_md5(filepath))
 
 
 def get_file_line_count(filename: str) -> int:
-    """计算文件中的行数
-
-    参数:
-        filename: 要计算行数的文件路径
-
-    返回:
-        int: 文件中的行数，如果文件无法读取则返回0
-    """
-    try:
-        return len(open(filename, "r", encoding="utf-8", errors="ignore").readlines())
-    except Exception:
-        return 0
+    """计算文件中的行数（使用Rust原生实现）"""
+    return int(_jarvis_native.get_file_line_count(filename))
 
 
 def count_cmd_usage() -> None:

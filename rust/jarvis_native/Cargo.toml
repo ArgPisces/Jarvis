@@ -1,0 +1,18 @@
+[package]
+name = "jarvis_native"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Native acceleration for Jarvis via PyO3"
+authors = ["skyfire <skyfireitdiy@hotmail.com>"]
+
+[lib]
+name = "jarvis_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py39"] }
+serde_json = "1.0"
+chrono = { version = "0.4", default-features = true }
+md5 = "0.7"
+regex = "1"

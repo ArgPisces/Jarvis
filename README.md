@@ -158,6 +158,33 @@ uv pip install .
 > - Bash/Zsh: 在 ~/.bashrc 或 ~/.zshrc 中添加 `source /path/to/Jarvis/.venv/bin/activate`
 > - Fish: 在 ~/.config/fish/config.fish 中添加 `source /path/to/Jarvis/.venv/bin/activate.fish`
 
+### 原生模块（PyO3 + Rust，默认启用）
+Jarvis 采用 PyO3 提供的 Rust 原生实现作为默认路径，安装时会自动构建并加载原生扩展。若缺少 Rust 工具链或构建失败，安装将失败。
+
+- 当前加速入口（可选）：
+  - jarvis_stats.storage.StatsStorage.get_metrics
+  - jarvis_stats.storage.StatsStorage.get_metric_total
+  - jarvis_stats.storage.StatsStorage.aggregate_metrics
+
+
+安装与构建
+1) 安装基础依赖与 Rust 工具链
+   - Linux/macOS: 建议使用 rustup 安装 Rust
+   - 安装构建工具（maturin 由构建后端自动使用）:
+     - uv: uv pip install .
+     - 或 pip: pip install .
+2) 构建并本地安装原生扩展
+   - 使用 maturin 在本地虚拟环境中开发安装：
+     - maturin develop -m rust/jarvis_native/Cargo.toml --release
+   - 完成后会在环境中安装 jarvis_native 模块，Jarvis 运行时将自动尝试加载。
+3) 验证
+   - python -c "import jarvis.jarvis_native as jn; print('OK', hasattr(jn, 'stats_get_metric_total'))"
+
+注意
+- 未安装或加载失败均会自动回退，无需额外配置。
+- Windows/macOS/Linux 均可构建，但需正确安装对应平台的 Rust 工具链。
+- 后续我们将逐步在热点路径增加原生实现，确保可观的性能收益与稳定性。
+
 ### 基本使用
 Jarvis 包含一系列专注于不同任务的工具。以下是主要命令及其快捷方式：
 

@@ -18,6 +18,10 @@ from jarvis.jarvis_utils.config import get_data_dir, get_tool_load_dirs
 from jarvis.jarvis_utils.output import OutputType, PrettyOutput
 from jarvis.jarvis_utils.tag import ct, ot
 from jarvis.jarvis_utils.utils import is_context_overflow, daily_check_git_updates
+# Native implementation required (PyO3)
+from jarvis import jarvis_native as _jarvis_native  # type: ignore
+if not hasattr(_jarvis_native, "extract_tool_call_blocks"):
+    raise RuntimeError("jarvis_native extension is required but not available")
 
 tool_call_help = f"""
 <tool_system_guide>
@@ -611,9 +615,14 @@ class ToolRegistry(OutputHandlerProtocol):
 
     @staticmethod
     def _has_tool_calls_block(content: str) -> bool:
-        """从内容中提取工具调用块（仅匹配行首标签）"""
-        pattern = rf'(?ms)^{re.escape(ot("TOOL_CALL"))}(.*?)^{re.escape(ct("TOOL_CALL"))}'
-        return re.search(pattern, content) is not None
+        """从内容中提取工具调用块（仅匹配行首标签） - 使用原生实现"""
+        try:
+            blocks, _ = _jarvis_native.extract_tool_call_blocks(
+                content, ot("TOOL_CALL"), ct("TOOL_CALL")
+            )
+            return bool(blocks)
+        except Exception:
+            return False
 
     @staticmethod
     def _extract_tool_calls(
@@ -635,8 +644,11 @@ class ToolRegistry(OutputHandlerProtocol):
         """
         # 将内容拆分为行
         pattern = rf'(?ms)^{re.escape(ot("TOOL_CALL"))}(.*?)^{re.escape(ct("TOOL_CALL"))}'
-        data = re.findall(pattern, content)
-        auto_completed = False
+        # 优先使用原生实现提取工具调用块（如失败再回退到正则）
+        data, auto_completed = _jarvis_native.extract_tool_call_blocks(
+            content, ot("TOOL_CALL"), ct("TOOL_CALL")
+        )
+        # 原生实现为必选路径，不再回退到正则提取
         if not data:
             # can_handle 确保 ot("TOOL_CALL") 在内容中（行首）。
             # 如果数据为空，则表示行首的 ct("TOOL_CALL") 可能丢失。

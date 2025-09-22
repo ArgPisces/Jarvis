@@ -14,6 +14,11 @@ import sys
 import time
 import uuid
 
+# Native implementation required (PyO3)
+from jarvis import jarvis_native as _jarvis_native  # type: ignore
+if not hasattr(_jarvis_native, "stats_get_metrics"):
+    raise RuntimeError("jarvis_native extension is required but not available")
+
 
 class StatsStorage:
     """统计数据存储类"""
@@ -250,6 +255,16 @@ class StatsStorage:
         if start_time is None:
             start_time = end_time - timedelta(days=7)  # 默认最近7天
 
+        # 使用Rust原生实现（强制）
+        native_res = _jarvis_native.stats_get_metrics(
+            str(self.data_dir),
+            metric_name,
+            start_time.isoformat(),
+            end_time.isoformat(),
+            tags or None,
+        )
+        return native_res
+
         results = []
 
         # 遍历日期
@@ -311,6 +326,19 @@ class StatsStorage:
             except Exception:
                 # 读取失败则重建
                 pass
+
+        # 使用原生实现进行一次性计算并写入缓存（强制）
+        native_total = float(_jarvis_native.stats_get_metric_total(str(self.data_dir), metric_name))
+        try:
+            self._save_text_atomic(total_file, str(native_total))
+        except Exception:
+            pass
+        # 维持与Python实现一致的元数据分组推断（不依赖累计值）
+        try:
+            _ = self.resolve_metric_group(metric_name)
+        except Exception:
+            pass
+        return native_total
 
         # 扫描历史数据进行一次性计算，并尽可能推断分组信息
         total = 0.0
@@ -502,6 +530,19 @@ class StatsStorage:
         Returns:
             聚合后的数据字典
         """
+        # 使用原生实现直接聚合（强制）
+        _end = end_time or datetime.now()
+        _start = start_time or (_end - timedelta(days=7))
+        native_res = _jarvis_native.stats_aggregate_metrics(
+            str(self.data_dir),
+            metric_name,
+            _start.isoformat(),
+            _end.isoformat(),
+            aggregation or "hourly",
+            tags or None,
+        )
+        return native_res
+
         records = self.get_metrics(metric_name, start_time, end_time, tags)
 
         if not records:
