@@ -41,6 +41,7 @@ from jarvis.jarvis_utils.config import get_data_dir, get_replace_map
 from jarvis.jarvis_utils.globals import get_message_history
 from jarvis.jarvis_utils.output import OutputType, PrettyOutput
 from jarvis.jarvis_utils.tag import ot
+from jarvis import jarvis_native as _jarvis_native  # type: ignore
 
 # Sentinel value to indicate that Ctrl+O was pressed
 CTRL_O_SENTINEL = "__CTRL_O_PRESSED__"
@@ -288,39 +289,20 @@ class FileCompleter(Completer):
         # File path candidates
         try:
             if current_sym == "@":
-                import subprocess
-
                 if self._git_files_cache is None:
-                    result = subprocess.run(
-                        ["git", "ls-files"],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        text=True,
-                    )
-                    if result.returncode == 0:
-                        self._git_files_cache = [
-                            p for p in result.stdout.splitlines() if p.strip()
-                        ]
-                    else:
+                    try:
+                        self._git_files_cache = _jarvis_native.list_git_files()
+                    except Exception:
                         self._git_files_cache = []
                 paths = self._git_files_cache or []
             else:
-                import os as _os
-
                 if self._all_files_cache is None:
-                    files: List[str] = []
-                    for root, dirs, fnames in _os.walk(".", followlinks=False):
-                        # Exclude .git directory
-                        dirs[:] = [d for d in dirs if d != ".git"]
-                        for name in fnames:
-                            files.append(
-                                _os.path.relpath(_os.path.join(root, name), ".")
-                            )
-                            if len(files) > self._max_walk_files:
-                                break
-                        if len(files) > self._max_walk_files:
-                            break
-                    self._all_files_cache = files
+                    try:
+                        self._all_files_cache = _jarvis_native.list_files_excluding_git(
+                            ".", int(self._max_walk_files)
+                        )
+                    except Exception:
+                        self._all_files_cache = []
                 paths = self._all_files_cache or []
             all_completions.extend([(path, "File") for path in paths])
         except Exception:

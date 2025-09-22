@@ -479,35 +479,12 @@ class StatsStorage:
         return meta.get("metrics", {}).get(metric_name)
 
     def list_metrics(self) -> List[str]:
-        """列出所有指标"""
-        # 从元数据文件获取指标
-        meta = self._load_json(self.meta_file)
-        metrics_from_meta = set(meta.get("metrics", {}).keys())
-
-        # 扫描所有数据文件获取实际存在的指标
-        metrics_from_data: Set[str] = set()
-        for data_file in self.data_dir.glob("stats_*.json"):
-            try:
-                data = self._load_json(data_file)
-                metrics_from_data.update(data.keys())
-            except (json.JSONDecodeError, OSError):
-                # 忽略无法读取的文件
-                continue
-
-        # 扫描总量缓存目录中已有的指标文件
-        metrics_from_totals: Set[str] = set()
-        try:
-            for f in self.totals_dir.glob("*"):
-                if f.is_file():
-                    metrics_from_totals.add(f.name)
-        except Exception:
-            pass
-
-        # 合并三个来源的指标并返回排序后的列表
-        all_metrics = metrics_from_meta.union(metrics_from_data).union(
-            metrics_from_totals
+        """列出所有指标（Rust原生实现）"""
+        return list(
+            _jarvis_native.stats_list_metrics(
+                str(self.data_dir), str(self.totals_dir), str(self.meta_file)
+            )
         )
-        return sorted(list(all_metrics))
 
     def aggregate_metrics(
         self,

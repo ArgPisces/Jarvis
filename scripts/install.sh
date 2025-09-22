@@ -74,8 +74,25 @@ else
     git clone "$REPO_URL" "$DEST_DIR"
 fi
 
-echo -e "\n--- 3. 设置虚拟环境并安装 Jarvis ---"
+echo -e "\n--- 3. 检查/安装 Rust 工具链（必需） ---"
 cd "$DEST_DIR"
+if ! command -v rustc &> /dev/null; then
+    echo "未检测到 Rust 工具链，准备安装 rustup（stable）..."
+    if command -v curl &> /dev/null; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    else
+        echo "错误：未找到 curl，请先安装 curl 或手动安装 rustup 后重试（https://rustup.rs）"
+        exit 1
+    fi
+    if [ -f "$HOME/.cargo/env" ]; then
+        # shellcheck disable=SC1090
+        source "$HOME/.cargo/env"
+    fi
+fi
+echo "Rustc: $(rustc --version)"
+echo "Cargo: $(cargo --version)"
+
+echo -e "\n--- 4. 设置虚拟环境并安装 Jarvis ---"
 
 if [ ! -d "$VENV_DIR" ]; then
     echo "正在 $VENV_DIR 创建虚拟环境..."
@@ -99,7 +116,7 @@ case "$choice" in
 esac
 
 
-echo -e "\n--- 4. 安装完成! ---"
+echo -e "\n--- 5. 安装完成! ---"
 echo "请根据您使用的 Shell，运行以下命令激活虚拟环境:"
 echo "  - Bash / Zsh:"
 echo "    source $VENV_DIR/bin/activate"
@@ -109,7 +126,7 @@ echo ""
 echo "激活后，您就可以使用 'jarvis' 命令。"
 
 # 检测用户shell类型并询问是否自动配置
-echo -e "\n--- 5. Shell 环境配置 (可选) ---"
+echo -e "\n--- 6. Shell 环境配置 (可选) ---"
 current_shell=$(basename "$SHELL")
 case "$current_shell" in
     bash|zsh|fish)

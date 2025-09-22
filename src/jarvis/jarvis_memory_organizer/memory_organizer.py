@@ -21,6 +21,7 @@ from jarvis.jarvis_utils.config import (
 from jarvis.jarvis_utils.output import OutputType, PrettyOutput
 from jarvis.jarvis_platform.registry import PlatformRegistry
 from jarvis.jarvis_utils.utils import init_env
+from jarvis import jarvis_native as _jarvis_native  # type: ignore
 
 
 class MemoryOrganizer:
@@ -83,56 +84,12 @@ class MemoryOrganizer:
         self, memories: List[Dict[str, Any]], min_overlap: int
     ) -> Dict[int, List[Set[int]]]:
         """
-        查找具有重叠标签的记忆组
-
+        查找具有重叠标签的记忆组（Rust原生实现）
         返回：{重叠数量: [记忆索引集合列表]}
         """
-        # 构建标签到记忆索引的映射
-        tag_to_memories = defaultdict(set)
-        for i, memory in enumerate(memories):
-            for tag in memory.get("tags", []):
-                tag_to_memories[tag].add(i)
-
-        # 查找具有共同标签的记忆对
-        overlap_groups = defaultdict(list)
-        processed_groups = set()
-
-        # 对每对记忆计算标签重叠数
-        for i in range(len(memories)):
-            for j in range(i + 1, len(memories)):
-                tags_i = set(memories[i].get("tags", []))
-                tags_j = set(memories[j].get("tags", []))
-                overlap_count = len(tags_i & tags_j)
-
-                if overlap_count >= min_overlap:
-                    # 查找包含这两个记忆的最大组
-                    group = {i, j}
-
-                    # 扩展组，包含所有与组内记忆有足够重叠的记忆
-                    changed = True
-                    while changed:
-                        changed = False
-                        for k in range(len(memories)):
-                            if k not in group:
-                                # 检查与组内所有记忆的最小重叠数
-                                min_overlap_with_group = min(
-                                    len(
-                                        set(memories[k].get("tags", []))
-                                        & set(memories[m].get("tags", []))
-                                    )
-                                    for m in group
-                                )
-                                if min_overlap_with_group >= min_overlap:
-                                    group.add(k)
-                                    changed = True
-
-                    # 将组转换为有序元组以便去重
-                    group_tuple = tuple(sorted(group))
-                    if group_tuple not in processed_groups:
-                        processed_groups.add(group_tuple)
-                        overlap_groups[min_overlap].append(set(group_tuple))
-
-        return overlap_groups
+        groups = _jarvis_native.find_overlapping_groups(memories, int(min_overlap))
+        # 转换为 {min_overlap: [set(indices), ...]}
+        return {int(min_overlap): [set(g) for g in groups]}
 
     def _merge_memories_with_llm(
         self, memories: List[Dict[str, Any]]

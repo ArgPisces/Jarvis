@@ -1,11 +1,13 @@
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList, PyAny};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::Path;
+use std::collections::HashSet;
 use chrono::NaiveDateTime;
+use regex::Regex;
 
 fn parse_iso_naive(s: &str) -> Option<NaiveDateTime> {
     // Python datetime.isoformat() without timezone, e.g., "2025-09-22T12:34:56.123456"
@@ -142,9 +144,9 @@ pub fn stats_get_metrics(
     tags: Option<Bound<'_, PyDict>>,
 ) -> PyResult<Vec<PyObject>> {
     let start = parse_iso_naive(start_iso)
-        .unwrap_or_else(|| NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
+        .unwrap_or_else(|| parse_iso_naive("1970-01-01T00:00:00").unwrap());
     let end = parse_iso_naive(end_iso)
-        .unwrap_or_else(|| NaiveDateTime::from_timestamp_opt(i64::MAX / 2, 0).unwrap());
+        .unwrap_or_else(|| parse_iso_naive("9999-12-31T23:59:59").unwrap());
     let tag_filter = py_to_hashmap_str_str(tags);
 
     let base = Path::new(data_dir);
@@ -222,9 +224,9 @@ pub fn stats_aggregate_metrics(
     tags: Option<Bound<'_, PyDict>>,
 ) -> PyResult<PyObject> {
     let start = parse_iso_naive(start_iso)
-        .unwrap_or_else(|| NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
+        .unwrap_or_else(|| parse_iso_naive("1970-01-01T00:00:00").unwrap());
     let end = parse_iso_naive(end_iso)
-        .unwrap_or_else(|| NaiveDateTime::from_timestamp_opt(i64::MAX / 2, 0).unwrap());
+        .unwrap_or_else(|| parse_iso_naive("9999-12-31T23:59:59").unwrap());
     let tag_filter = py_to_hashmap_str_str(tags);
     let base = Path::new(data_dir);
 
@@ -318,4 +320,200 @@ pub fn stats_aggregate_metrics(
         res.set_item(k.as_str(), d).ok();
     }
     Ok(res.into_any().unbind())
+}
+
+#[pyfunction]
+pub fn find_overlapping_groups(_py: Python<'_>, memories: Bound<'_, PyAny>, min_overlap: usize) -> PyResult<Vec<Vec<usize>>> {
+    // Extract tags list from memories (Python list of dicts with key "tags")
+    let list = memories.downcast::<PyList>()?;
+    let mut tags_vec: Vec<std::collections::HashSet<String>> = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        // Each item should be a dict
+        let dict = match item.downcast::<PyDict>() {
+            Ok(d) => d,
+            Err(_) => {
+                tags_vec.push(std::collections::HashSet::new());
+                continue;
+            }
+        };
+        let mut s: std::collections::HashSet<String> = std::collections::HashSet::new();
+        if let Ok(Some(tags_obj)) = dict.get_item("tags") {
+            if let Ok(tag_list) = tags_obj.downcast::<PyList>() {
+                for t in tag_list.iter() {
+                    if let Ok(st) = t.extract::<String>() {
+                        s.insert(st);
+                    }
+                }
+            }
+        }
+        tags_vec.push(s);
+    }
+
+    let n = tags_vec.len();
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // helper to compute intersection size
+    let inter_size = |a: &std::collections::HashSet<String>, b: &std::collections::HashSet<String>| -> usize {
+        if a.len() < b.len() {
+            a.iter().filter(|x| b.contains(*x)).count()
+        } else {
+            b.iter().filter(|x| a.contains(*x)).count()
+        }
+    };
+
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let ov = inter_size(&tags_vec[i], &tags_vec[j]);
+            if ov >= min_overlap {
+                let mut group: std::collections::BTreeSet<usize> = [i, j].into_iter().collect();
+
+                // Expand group: include any k that has min overlap with all members >= min_overlap
+                let mut changed = true;
+                while changed {
+                    changed = false;
+                    for k in 0..n {
+                        if group.contains(&k) {
+                            continue;
+                        }
+                        // compute min overlap with current group
+                        let mut min_ov = usize::MAX;
+                        for &m in group.iter() {
+                            let ov2 = inter_size(&tags_vec[k], &tags_vec[m]);
+                            if ov2 < min_ov {
+                                min_ov = ov2;
+                            }
+                            if min_ov < min_overlap {
+                                break;
+                            }
+                        }
+                        if min_ov >= min_overlap {
+                            group.insert(k);
+                            changed = true;
+                        }
+                    }
+                }
+
+                let v: Vec<usize> = group.into_iter().collect();
+                // Use sorted key to deduplicate
+                let key = v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
+                if !seen.contains(&key) {
+                    seen.insert(key);
+                    groups.push(v);
+                }
+            }
+        }
+    }
+
+    Ok(groups)
+}
+
+#[pyfunction]
+pub fn stats_list_metrics(data_dir: &str, totals_dir: &str, meta_file: &str) -> PyResult<Vec<String>> {
+    let mut set: HashSet<String> = HashSet::new();
+
+    // 1) meta file: metrics keys
+    let meta_path = Path::new(meta_file);
+    if meta_path.exists() && meta_path.is_file() {
+        if let Some(v) = load_json(meta_path) {
+            if let Some(obj) = v.get("metrics").and_then(|m| m.as_object()) {
+                for (k, _) in obj.iter() {
+                    set.insert(k.to_string());
+                }
+            }
+        }
+    }
+
+    // 2) data files: top-level metric names
+    let data_path = Path::new(data_dir);
+    if let Ok(entries) = fs::read_dir(data_path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if !is_stats_file(&p) {
+                continue;
+            }
+            if let Some(v) = load_json(&p) {
+                if let Some(obj) = v.as_object() {
+                    for (k, _) in obj.iter() {
+                        set.insert(k.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // 3) totals dir: file names
+    let totals_path = Path::new(totals_dir);
+    if let Ok(entries) = fs::read_dir(totals_path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
+                    set.insert(name.to_string());
+                }
+            }
+        }
+    }
+
+    // return sorted
+    let mut v: Vec<String> = set.into_iter().collect();
+    v.sort();
+    Ok(v)
+}
+
+#[pyfunction]
+pub fn git_modified_line_ranges(py: Python<'_>) -> PyResult<PyObject> {
+    use std::process::Command;
+
+    let output = match Command::new("git").arg("show").output() {
+        Ok(o) => o,
+        Err(_) => {
+            let d = PyDict::new_bound(py);
+            return Ok(d.into_any().unbind());
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let re_range = Regex::new(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@").unwrap();
+
+    let result = PyDict::new_bound(py);
+    let mut current_file: Option<String> = None;
+
+    for line in stdout.lines() {
+        if let Some(rest) = line.strip_prefix("+++ b/") {
+            current_file = Some(rest.to_string());
+            continue;
+        }
+        if let Some(file) = &current_file {
+            if let Some(caps) = re_range.captures(line) {
+                if let Some(m1) = caps.get(1) {
+                    let start: i64 = m1.as_str().parse().unwrap_or(1);
+                    let count: i64 = caps.get(2).map(|m| m.as_str().parse().unwrap_or(1)).unwrap_or(1);
+                    let end = start + count - 1;
+
+                    // append tuple (start, end) into list for this file
+                    let list_any = result.get_item(file);
+                    if let Ok(Some(obj)) = list_any {
+                        if let Ok(list) = obj.downcast::<pyo3::types::PyList>() {
+                            let tup: Py<PyAny> = (start, end).into_py(py);
+                            list.append(tup).ok();
+                        } else {
+                            // overwrite with new list if unexpected type
+                            let l = pyo3::types::PyList::empty_bound(py);
+                            let tup: Py<PyAny> = (start, end).into_py(py);
+                            l.append(tup).ok();
+                            result.set_item(file, l).ok();
+                        }
+                    } else {
+                        let l = pyo3::types::PyList::empty_bound(py);
+                        let tup: Py<PyAny> = (start, end).into_py(py);
+                        l.append(tup).ok();
+                        result.set_item(file, l).ok();
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(result.into_any().unbind())
 }
